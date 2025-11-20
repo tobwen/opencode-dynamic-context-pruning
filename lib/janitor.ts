@@ -1,5 +1,5 @@
 import { generateObject } from "ai"
-import { createShadowModel } from "./factory"
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { z } from "zod"
 import type { Logger } from "./logger"
 import type { StateManager } from "./state"
@@ -58,13 +58,13 @@ export class Janitor {
                             // Try to get parameters from cache first, fall back to part.parameters
                             const cachedData = this.toolParametersCache.get(part.callID)
                             const parameters = cachedData?.parameters || part.parameters
-                            
+
                             // Track tool metadata (name and parameters)
                             toolMetadata.set(part.callID, {
                                 tool: part.tool,
                                 parameters: parameters
                             })
-                            
+
                             // Debug: log what we're storing
                             if (part.callID.startsWith('prt_') || part.tool === "read" || part.tool === "list") {
                                 this.logger.debug("janitor", "Storing tool metadata", {
@@ -149,7 +149,12 @@ export class Janitor {
             }
 
             // Use big-pickle model - no auth needed!
-            const model = createShadowModel()
+            // Use big-pickle model (public and free, no auth needed)
+            const openai = createOpenAICompatible({
+                baseURL: "https://opencode.ai/zen/v1",
+                name: "opencode",
+            })
+            const model = openai("big-pickle")
 
             this.logger.debug("janitor", "Starting shadow inference", { sessionID })
 
@@ -223,13 +228,13 @@ export class Janitor {
                         if (path.startsWith(homeDir)) {
                             path = '~' + path.slice(homeDir.length)
                         }
-                        
+
                         // Shorten node_modules paths: show package + file only
                         const nodeModulesMatch = path.match(/node_modules\/(@[^\/]+\/[^\/]+|[^\/]+)\/(.*)/)
                         if (nodeModulesMatch) {
                             return `${nodeModulesMatch[1]}/${nodeModulesMatch[2]}`
                         }
-                        
+
                         return path
                     }
 
@@ -301,7 +306,7 @@ export class Janitor {
 
                     // Format the message with tool details
                     let message = `Pruned ${finalPrunedIds.length} tool output${finalPrunedIds.length > 1 ? 's' : ''} from context (~${estimatedTokensSaved.toLocaleString()} tokens saved)\n`
-                    
+
                     for (const [toolName, params] of toolsSummary.entries()) {
                         if (params.length > 0) {
                             message += `\n${toolName} (${params.length}):\n`
