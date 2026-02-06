@@ -4,6 +4,8 @@ import { Logger } from "../logger"
 import type { SessionState, WithParts } from "../state"
 import type { UserMessage } from "@opencode-ai/sdk/v2"
 
+// ── Constants & Private Helpers ──────────────────────────────────────────────
+
 export const COMPRESS_SUMMARY_PREFIX = "[Compressed conversation block]\n\n"
 
 const generateUniqueId = (prefix: string): string => `${prefix}_${ulid()}`
@@ -13,37 +15,13 @@ const isGeminiModel = (modelID: string): boolean => {
     return lowerModelID.includes("gemini")
 }
 
-export const createSyntheticUserMessage = (
-    baseMessage: WithParts,
-    content: string,
-    variant?: string,
-): WithParts => {
-    const userInfo = baseMessage.info as UserMessage
-    const now = Date.now()
-    const messageId = generateUniqueId("msg")
-    const partId = generateUniqueId("prt")
-
-    return {
-        info: {
-            id: messageId,
-            sessionID: userInfo.sessionID,
-            role: "user" as const,
-            agent: userInfo.agent,
-            model: userInfo.model,
-            time: { created: now },
-            ...(variant !== undefined && { variant }),
-        },
-        parts: [
-            {
-                id: partId,
-                sessionID: userInfo.sessionID,
-                messageID: messageId,
-                type: "text" as const,
-                text: content,
-            },
-        ],
-    }
+export const isClaudeModel = (modelID: string, providerID: string): boolean => {
+    const lowerModelID = modelID.toLowerCase()
+    const lowerProviderID = providerID.toLowerCase()
+    return lowerModelID.includes("claude") && lowerProviderID.includes("anthropic")
 }
+
+// ── Synthetic Part Factories ─────────────────────────────────────────────────
 
 export const createSyntheticTextPart = (baseMessage: WithParts, content: string) => {
     const userInfo = baseMessage.info as UserMessage
@@ -73,55 +51,6 @@ export const createSyntheticReasoningPart = (
         type: "reasoning" as const,
         text,
         time: { start: now, end: now },
-    }
-}
-
-export const createSyntheticAssistantMessage = (
-    baseMessage: WithParts,
-    textContent: string,
-    reasoningText: string = "",
-): WithParts => {
-    const userInfo = baseMessage.info as UserMessage
-    const now = Date.now()
-    const messageId = generateUniqueId("msg")
-
-    const parts: any[] = []
-
-    // Add reasoning part first (Claude expects reasoning before text)
-    const reasoningPart = createSyntheticReasoningPart(userInfo.sessionID, messageId, reasoningText)
-    parts.push(reasoningPart)
-
-    // Add text part with actual content
-    const textPartId = generateUniqueId("prt")
-    parts.push({
-        id: textPartId,
-        sessionID: userInfo.sessionID,
-        messageID: messageId,
-        type: "text" as const,
-        text: textContent,
-    })
-
-    return {
-        info: {
-            id: messageId,
-            sessionID: userInfo.sessionID,
-            role: "assistant" as const,
-            time: { created: now, completed: now },
-            parentID: userInfo.id,
-            modelID: userInfo.model?.modelID || "",
-            providerID: userInfo.model?.providerID || "",
-            mode: "",
-            agent: userInfo.agent,
-            path: { cwd: "", root: "" },
-            cost: 0,
-            tokens: {
-                input: 0,
-                output: 0,
-                reasoning: 0,
-                cache: { read: 0, write: 0 },
-            },
-        },
-        parts,
     }
 }
 
@@ -158,6 +87,124 @@ export const createSyntheticToolPart = (
         },
     }
 }
+
+// ── Synthetic Message Factories ──────────────────────────────────────────────
+
+export const createSyntheticUserMessage = (
+    baseMessage: WithParts,
+    content: string,
+    variant?: string,
+): WithParts => {
+    const userInfo = baseMessage.info as UserMessage
+    const now = Date.now()
+    const messageId = generateUniqueId("msg")
+    const partId = generateUniqueId("prt")
+
+    return {
+        info: {
+            id: messageId,
+            sessionID: userInfo.sessionID,
+            role: "user" as const,
+            agent: userInfo.agent,
+            model: userInfo.model,
+            time: { created: now },
+            ...(variant !== undefined && { variant }),
+        },
+        parts: [
+            {
+                id: partId,
+                sessionID: userInfo.sessionID,
+                messageID: messageId,
+                type: "text" as const,
+                text: content,
+            },
+        ],
+    }
+}
+
+export const createSyntheticAssistantMessage = (
+    baseMessage: WithParts,
+    reasoningText: string,
+): WithParts => {
+    const userInfo = baseMessage.info as UserMessage
+    const now = Date.now()
+    const messageId = generateUniqueId("msg")
+
+    const reasoningPart = createSyntheticReasoningPart(userInfo.sessionID, messageId, reasoningText)
+
+    return {
+        info: {
+            id: messageId,
+            sessionID: userInfo.sessionID,
+            role: "assistant" as const,
+            time: { created: now, completed: now },
+            parentID: userInfo.id,
+            modelID: userInfo.model?.modelID || "",
+            providerID: userInfo.model?.providerID || "",
+            mode: "",
+            agent: userInfo.agent,
+            path: { cwd: "", root: "" },
+            cost: 0,
+            tokens: {
+                input: 0,
+                output: 0,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+            },
+        },
+        parts: [reasoningPart],
+    }
+}
+
+// ── Message Utilities ────────────────────────────────────────────────────────
+
+export const hasReasoningParts = (msg: WithParts): boolean => {
+    return msg.parts.some((part) => part.type === "reasoning")
+}
+
+export const isIgnoredUserMessage = (message: WithParts): boolean => {
+    const parts = Array.isArray(message.parts) ? message.parts : []
+    if (parts.length === 0) {
+        return true
+    }
+
+    for (const part of parts) {
+        if (!(part as any).ignored) {
+            return false
+        }
+    }
+
+    return true
+}
+
+export const findMessageIndex = (messages: WithParts[], messageId: string): number => {
+    return messages.findIndex((msg) => msg.info.id === messageId)
+}
+
+export function buildToolIdList(
+    state: SessionState,
+    messages: WithParts[],
+    logger: Logger,
+): string[] {
+    const toolIds: string[] = []
+    for (const msg of messages) {
+        if (isMessageCompacted(state, msg)) {
+            continue
+        }
+        const parts = Array.isArray(msg.parts) ? msg.parts : []
+        if (parts.length > 0) {
+            for (const part of parts) {
+                if (part.type === "tool" && part.callID && part.tool) {
+                    toolIds.push(part.callID)
+                }
+            }
+        }
+    }
+    state.toolIdList = toolIds
+    return toolIds
+}
+
+// ── Tool Metadata ────────────────────────────────────────────────────────────
 
 /**
  * Extracts a human-readable key from tool metadata for display purposes.
@@ -291,46 +338,4 @@ export const extractParameterKey = (tool: string, parameters: any): string => {
         return ""
     }
     return paramStr.substring(0, 50)
-}
-
-export function buildToolIdList(
-    state: SessionState,
-    messages: WithParts[],
-    logger: Logger,
-): string[] {
-    const toolIds: string[] = []
-    for (const msg of messages) {
-        if (isMessageCompacted(state, msg)) {
-            continue
-        }
-        const parts = Array.isArray(msg.parts) ? msg.parts : []
-        if (parts.length > 0) {
-            for (const part of parts) {
-                if (part.type === "tool" && part.callID && part.tool) {
-                    toolIds.push(part.callID)
-                }
-            }
-        }
-    }
-    state.toolIdList = toolIds
-    return toolIds
-}
-
-export const isIgnoredUserMessage = (message: WithParts): boolean => {
-    const parts = Array.isArray(message.parts) ? message.parts : []
-    if (parts.length === 0) {
-        return true
-    }
-
-    for (const part of parts) {
-        if (!(part as any).ignored) {
-            return false
-        }
-    }
-
-    return true
-}
-
-export const findMessageIndex = (messages: WithParts[], messageId: string): number => {
-    return messages.findIndex((msg) => msg.info.id === messageId)
 }

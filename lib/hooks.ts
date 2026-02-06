@@ -25,13 +25,22 @@ export function createSystemPromptHandler(
     config: PluginConfig,
 ) {
     return async (
-        input: { sessionID?: string; model: { limit: { context: number } } },
+        input: {
+            sessionID?: string
+            model: {
+                id: string
+                providerID: string
+                limit: { context: number }
+            }
+        },
         output: { system: string[] },
     ) => {
-        if (input.model?.limit?.context) {
-            state.modelContextLimit = input.model.limit.context
-            logger.debug("Cached model context limit", { limit: state.modelContextLimit })
+        state.model = {
+            id: input.model?.id,
+            provider: input.model?.providerID,
+            contextLimit: input.model?.limit?.context,
         }
+        logger.debug("Cached model info", state.model)
 
         if (state.isSubAgent) {
             return

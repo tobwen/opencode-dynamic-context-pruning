@@ -1,7 +1,7 @@
 import type { SessionState, WithParts } from "../state"
 import type { Logger } from "../logger"
 import type { PluginConfig } from "../config"
-import type { UserMessage } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, UserMessage } from "@opencode-ai/sdk/v2"
 import { renderNudge, renderCompressNudge } from "../prompts"
 import {
     extractParameterKey,
@@ -9,6 +9,8 @@ import {
     createSyntheticToolPart,
     createSyntheticAssistantMessage,
     isIgnoredUserMessage,
+    hasReasoningParts,
+    isClaudeModel,
 } from "./utils"
 import { getFilePathsFromParameters, isProtected } from "../protected-file-patterns"
 import { getLastUserMessage, isMessageCompacted } from "../shared-utils"
@@ -56,7 +58,7 @@ Context management was just performed. Do NOT use the ${toolName} again. A fresh
 const resolveContextLimit = (config: PluginConfig, state: SessionState): number | undefined => {
     const configLimit = config.tools.settings.contextLimit
     if (configLimit === "model") {
-        return state.modelContextLimit
+        return state.model.contextLimit
     }
     return configLimit
 }
@@ -229,19 +231,25 @@ export const insertPruneToolContext = (
         return
     }
 
-    // When following a user message, append a synthetic text part to the user message.
-    // When following an assistant message, insert a full synthetic assistant message
-    // with a reasoning part (Claude expects assistant turns to start with reasoning).
-    if (lastNonIgnoredMessage.info.role === "user") {
-        const textPart = createSyntheticTextPart(lastNonIgnoredMessage, combinedContent)
-        lastNonIgnoredMessage.parts.push(textPart)
+    injectContent(messages, lastNonIgnoredMessage, combinedContent)
+}
+
+const injectContent = (messages: WithParts[], target: WithParts, content: string): void => {
+    if (target.info.role === "user") {
+        const textPart = createSyntheticTextPart(target, content)
+        target.parts.push(textPart)
     } else {
-        const assistantMessage = createSyntheticAssistantMessage(
-            lastNonIgnoredMessage,
-            combinedContent,
-            "", // Empty reasoning text - testing if this works with Claude
-        )
-        const insertIndex = messages.indexOf(lastNonIgnoredMessage) + 1
-        messages.splice(insertIndex, 0, assistantMessage)
+        const assistantInfo = target.info as AssistantMessage
+        if (
+            hasReasoningParts(target) &&
+            isClaudeModel(assistantInfo.modelID, assistantInfo.providerID)
+        ) {
+            const assistantMessage = createSyntheticAssistantMessage(target, content)
+            const insertIndex = messages.indexOf(target) + 1
+            messages.splice(insertIndex, 0, assistantMessage)
+        } else {
+            const toolPart = createSyntheticToolPart(target, content, assistantInfo.modelID)
+            target.parts.push(toolPart)
+        }
     }
 }

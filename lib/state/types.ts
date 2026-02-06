@@ -31,6 +31,12 @@ export interface Prune {
     messageIds: Set<string>
 }
 
+export interface ModelInfo {
+    id: string | undefined
+    provider: string | undefined
+    contextLimit: number | undefined
+}
+
 export interface SessionState {
     sessionId: string | null
     isSubAgent: boolean
@@ -44,5 +50,5 @@ export interface SessionState {
     lastCompaction: number
     currentTurn: number
     variant: string | undefined
-    modelContextLimit: number | undefined
+    model: ModelInfo
 }
