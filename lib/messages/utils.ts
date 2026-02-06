@@ -18,7 +18,9 @@ export const isAnthropic = (state: SessionState, msg: WithParts): boolean => {
     const modelID = info.modelID || ""
     const providerID = info.providerID || ""
     return (
-        state.model.interleaved &&
+        //interleaved check doesn't work yet because no anthropic models have
+        //interleaved true in models.dev. Why? idk
+        // state.model.interleaved &&
         modelID.toLowerCase().includes("claude") &&
         providerID.toLowerCase().includes("anthropic") &&
         hasReasoningParts(msg)
@@ -31,7 +33,6 @@ export const isAntigravity = (state: SessionState, msg: WithParts): boolean => {
     const providerID = info.providerID || ""
     const lowerProviderID = providerID.toLowerCase()
     return (
-        state.model.interleaved &&
         (lowerProviderID === "llm-proxy" || lowerProviderID === "google") &&
         modelID.toLowerCase().includes("claude")
     )
@@ -129,27 +130,27 @@ export const createAssistantMessage = (
     reasoningText: string,
     textContent?: string,
 ): WithParts => {
-    const userInfo = baseMessage.info as UserMessage
+    const info = baseMessage.info as AssistantMessage
     const now = Date.now()
     const messageId = generateUniqueId("msg")
 
-    const parts: any[] = [createReasoningPart(userInfo.sessionID, messageId, reasoningText)]
+    const parts: any[] = [createReasoningPart(info.sessionID, messageId, reasoningText)]
 
     if (textContent) {
-        parts.push(createTextPart(userInfo.sessionID, messageId, textContent))
+        parts.push(createTextPart(info.sessionID, messageId, textContent))
     }
 
     return {
         info: {
             id: messageId,
-            sessionID: userInfo.sessionID,
+            sessionID: info.sessionID,
             role: "assistant" as const,
             time: { created: now, completed: now },
-            parentID: userInfo.id,
-            modelID: userInfo.model?.modelID || "",
-            providerID: userInfo.model?.providerID || "",
+            parentID: info.id,
+            modelID: info.modelID || "",
+            providerID: info.providerID || "",
             mode: "",
-            agent: userInfo.agent,
+            agent: info.agent,
             path: { cwd: "", root: "" },
             cost: 0,
             tokens: {
